@@ -55,28 +55,9 @@ struct SearchEngine {
         let all = regex.matches(in: text as String, range: NSRange(location: 0, length: text.length))
         storage.beginEditing()
         for m in all.reversed() {
-            var replaced = replacement
-            if options.useRegex { // honor $1 backreferences (best effort)
-                let captureGroups = 0...m.numberOfRanges - 1
-                var out = ""
-                var i = replacement.startIndex
-                while i < replacement.endIndex {
-                    if replacement[i] == "$" {
-                        let next = replacement.index(after: i)
-                        if next != replacement.endIndex,
-                           let d = Int(String(replacement[next])),
-                           d >= 1, d <= m.numberOfRanges - 1 {
-                            out += (text.substring(with: m.range(at: d)))
-                            i = next
-                            continue
-                        }
-                    }
-                    out.append(replacement[i])
-                    i = replacement.index(after: i)
-                }
-                _ = captureGroups
-                replaced = out
-            }
+            let replaced = options.useRegex
+                ? regex.replacementString(for: m, in: text as String, offset: 0, template: replacement)
+                : replacement
             storage.replaceCharacters(in: m.range, with: replaced)
         }
         storage.endEditing()
@@ -157,7 +138,14 @@ struct SearchEngine {
 
     /// Replace one occurrence (the range found by `find`).
     static func replaceOne(_ query: String, replacement: String, in storage: NSTextStorage, options: FindOptions, at range: NSRange) throws {
-        _ = try matches(query, options: options) // validate pattern
-        storage.replaceCharacters(in: range, with: replacement)
+        guard !query.isEmpty else { return }
+        let regex = try matches(query, options: options)
+        let text = storage.string
+        guard let match = regex.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length))
+            .first(where: { $0.range == range }) else { return }
+        let value = options.useRegex
+            ? regex.replacementString(for: match, in: text, offset: 0, template: replacement)
+            : replacement
+        storage.replaceCharacters(in: range, with: value)
     }
 }

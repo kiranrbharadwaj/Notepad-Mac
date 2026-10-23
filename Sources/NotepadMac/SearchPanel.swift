@@ -269,7 +269,7 @@ final class SearchPanel: NSPanel {
         guard let tv = textView else { return }
         do {
             try SearchEngine.replaceOne(queryField.stringValue, replacement: replaceField.stringValue, in: tv.textStorage!, options: options, at: tv.selectedRange())
-            document?.markDirty()
+            tv.didChangeText()
             clearResults()   // stored ranges are now stale after the edit
             _ = perform(.forward) // continue searching after replace
         } catch { statusLabel.stringValue = error.localizedDescription; NSSound.beep() }
@@ -279,7 +279,7 @@ final class SearchPanel: NSPanel {
         guard let tv = textView else { return }
         do {
             let count = try SearchEngine.replaceAll(queryField.stringValue, replacement: replaceField.stringValue, in: tv.textStorage!, options: options)
-            document?.markDirty()
+            tv.didChangeText()
             clearResults()   // stored ranges are now stale after the edit
             statusLabel.stringValue = "Replaced \(count) occurrence(s)"
         } catch { statusLabel.stringValue = error.localizedDescription; NSSound.beep() }

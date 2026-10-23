@@ -61,9 +61,9 @@ open build/NotepadMac.app                        # from terminal
 
 - **Multi-window editor** — every document gets its own resizable window; close one without affecting the others
 - **15 languages with regex syntax highlighting** — Plain text, C/C++/C#/Java, JavaScript/TypeScript, Python (incl. triple-quoted strings), PHP, Go, Rust, JSON, SQL, HTML/XML, CSS/SCSS, Shell/Bash, Ruby, YAML/TOML/INI, Markdown; comments render italic
-- **Search & Replace** — modal sheet with regex support (`.*`, `\d+`…), case-sensitivity toggle, wrap-around option, and "Replace All" across the document
+- **Search & Replace** — floating panel with regex support (`.*`, `\d+`…), case-sensitivity toggle, wrap-around search, and "Replace All" across the document
 - **Editor view options** — whitespace marker dots and indent guides (both on by default), word-wrap toggle, font zoom in/out/reset
-- **Encoding & EOL handling** — auto-detects UTF-8/UTF-16 LE-BE/UTF-32 LE with Latin-1 fallback; preserves CRLF/LF line endings on save
+- **Encoding & EOL handling** — auto-detects UTF-8/UTF-16 LE-BE with Latin-1 fallback; preserves CRLF/LF line endings on save
 - **Line numbers** — logical line numbers stay aligned while scrolling, editing, and wrapping
 - **Find All navigation** — click a result to select its match; double-click to select the whole line
 - **Status bar** — live line/column, selection size, detected encoding and line-ending style per window

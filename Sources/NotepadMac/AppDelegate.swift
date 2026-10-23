@@ -8,7 +8,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMainMenu()
-        newDocument(nil)                       // Start with one blank document
+        for path in CommandLine.arguments.dropFirst() where !path.hasPrefix("-") {
+            openFile(URL(fileURLWithPath: path))
+        }
+        if controllers.isEmpty { newDocument(nil) }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -39,7 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.setFrameOrigin(origin)
             NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification, object: window, queue: .main
-            ) { [weak self] _ in self?.unregister(controller) }
+            ) { [weak self, weak controller] _ in
+                if let controller { self?.unregister(controller) }
+            }
         }
         controller.showWindow(nil)
     }
@@ -56,21 +61,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK else { return }
 
-        for url in panel.urls {
-            do {
-                let data = try Data(contentsOf: url)
-                let doc = EditorDocument()
-                if doc.load(data: data, url: url) {
-                    doc.languageID = Languages.forPath(url.path).id   // extension-based detection
-                    present(doc, cascadeIndex: controllers.count)
-                } else {
-                    NSSound.beep()
-                    presentError("Could not read \"\(url.lastPathComponent)\" as text.", detail: "The file may be binary.")
-                }
-            } catch {
-                NSSound.beep()
-                presentError("Could not open \"\(url.lastPathComponent)\".", detail: error.localizedDescription)
+        for url in panel.urls { openFile(url) }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { openFile(url) }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        for controller in controllers where !controller.confirmSaveIfDirty() { return .terminateCancel }
+        return .terminateNow
+    }
+
+    private func openFile(_ url: URL) {
+        do {
+            let data = try Data(contentsOf: url)
+            let doc = EditorDocument()
+            guard doc.load(data: data, url: url) else {
+                presentError("Could not read \"\(url.lastPathComponent)\" as text.", detail: "The file may be binary.")
+                return
             }
+            doc.languageID = Languages.forPath(url.path).id
+            present(doc, cascadeIndex: controllers.count)
+        } catch {
+            presentError("Could not open \"\(url.lastPathComponent)\".", detail: error.localizedDescription)
         }
     }
 

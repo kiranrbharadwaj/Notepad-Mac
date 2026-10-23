@@ -131,6 +131,7 @@ final class EditorWindowController: NSWindowController, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         guard !programmaticEdit else { return }
+        doc.text = textView.string
         doc.markDirty()
         refreshTitle()
         scheduleHighlight()
@@ -160,6 +161,7 @@ final class EditorWindowController: NSWindowController, NSTextViewDelegate {
 
     private func refreshTitle() {
         window?.title = doc.displayName
+        window?.isDocumentEdited = doc.isDirty
     }
 
     private func updateStatusBarMeta() {
@@ -221,32 +223,35 @@ final class EditorWindowController: NSWindowController, NSTextViewDelegate {
     // MARK: - Save (keep the same encoding/EOL; BOM only if one was there)
 
     @objc func saveDocument(_ sender: Any?) {
-        guard doc.isDirty else { NSSound.beep(); return }   // No write is needed for a clean document
-        do { try writeAndSave() } catch { NSSound.beep() }
+        do { try writeAndSave() } catch { NSApp.presentError(error) }
     }
 
     @objc func saveDocumentAs(_ sender: Any?) {
-        let panel = NSSavePanel()   // any file type allowed
-        panel.nameFieldStringValue = doc.displayName.hasSuffix(".") ? doc.displayName : doc.displayName + ".txt"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        do {
-            try writeAndSave(to: url)
-            doc.markSaved(at: url)
-            refreshTitle()
-        } catch {
-            NSSound.beep()
-        }
+        do { try saveAs() } catch { NSApp.presentError(error) }
     }
 
-    func writeAndSave() throws {   // internal so `saveAll` can reach other windows
-        guard let url = doc.fileURL else { saveDocumentAs(nil); return }
+    @discardableResult
+    private func saveAs() throws -> Bool {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = doc.fileURL == nil ? "Untitled.txt" : doc.displayName
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
         try writeAndSave(to: url)
+        return true
     }
 
-    /// Serialize with the document's EOL style + encoding (BOM included when required).
-    private func writeAndSave(to url: URL) throws {
+    /// False means the user canceled choosing a destination; errors propagate to callers.
+    @discardableResult
+    func writeAndSave() throws -> Bool {
+        guard let url = doc.fileURL else { return try saveAs() }
+        try writeAndSave(to: url)
+        return true
+    }
+
+    func writeAndSave(to url: URL) throws {
+        doc.text = textView.string
         try doc.saveData.write(to: url, options: .atomic)
+        doc.markSaved(at: url)
+        refreshTitle()
     }
 
     // MARK: - Language / encoding selection (menu items route here via the responder chain)
@@ -267,6 +272,8 @@ final class EditorWindowController: NSWindowController, NSTextViewDelegate {
         case "UTF-16 BE": doc.encoding = .utf16be
         default: doc.encoding = .ansi
         }
+        doc.markDirty()
+        refreshTitle()
         updateStatusBarMeta()
         markEncodingCheckmarks(name)   // checkmark follows the active encoding
     }
@@ -339,7 +346,7 @@ final class EditorWindowController: NSWindowController, NSTextViewDelegate {
     /// "Save All": writes every dirty document, keeping each one's own encoding/EOL.
     @objc func saveAll(_ sender: Any?) {
         for controller in NSApp.windows.compactMap({ $0.windowController as? EditorWindowController }) where controller.doc.isDirty {
-            do { try controller.writeAndSave() } catch { NSSound.beep() }
+            do { if try !controller.writeAndSave() { return } } catch { NSApp.presentError(error); return }
         }
     }
 
@@ -382,8 +389,7 @@ final class EditorWindowController: NSWindowController, NSTextViewDelegate {
     // MARK: - Close (prompt to save when dirty)
 
     @objc func closeDocument(_ sender: Any?) {
-        guard confirmSaveIfDirty() else { return }
-        window?.close()
+        window?.performClose(sender)
     }
 
     @objc func closeAllDocuments(_ sender: Any?) {
@@ -392,25 +398,37 @@ final class EditorWindowController: NSWindowController, NSTextViewDelegate {
         for controller in controllers { controller.window?.close() }
     }
 
-    private func confirmSaveIfDirty() -> Bool {
-        guard doc.isDirty else { return true }
-        let alert = NSAlert()
-        alert.messageText = "\"\(doc.displayName)\" has unsaved changes."
-        alert.informativeText = "Do you want to save your changes?"
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don't Save")
-        alert.addButton(withTitle: "Cancel")
-        // Synchronous modal dialog (NSAlert's sheet API is async-only in this SDK).
-        let response = alert.runModal()
-        switch response {
-        case .alertFirstButtonReturn:
-            do { try writeAndSave(); doc.markSaved(at: doc.fileURL); return true } catch { NSSound.beep(); return false }
-        case .alertSecondButtonReturn:
-            doc.clearDirty(); return true
-        default:
+    func confirmSaveIfDirty() -> Bool {
+        do {
+            return try confirmSaveIfDirty(choose: {
+                let alert = NSAlert()
+                alert.messageText = "\"\(doc.displayName)\" has unsaved changes."
+                alert.informativeText = "Do you want to save your changes?"
+                alert.addButton(withTitle: "Save")
+                alert.addButton(withTitle: "Don't Save")
+                alert.addButton(withTitle: "Cancel")
+                return alert.runModal()
+            }, save: { try writeAndSave() })
+        } catch {
+            NSApp.presentError(error)
             return false
         }
     }
+
+    /// Keep the close decision testable without displaying modal dialogs.
+    func confirmSaveIfDirty(choose: () -> NSApplication.ModalResponse,
+                            save: () throws -> Bool) rethrows -> Bool {
+        guard doc.isDirty else { return true }
+        switch choose() {
+        case .alertFirstButtonReturn: return try save()
+        // Keep dirty state until closing actually happens: another window may cancel Close All/Quit.
+        case .alertSecondButtonReturn: return true
+        default: return false
+        }
+    }
+
 }
 
-extension EditorWindowController: NSWindowDelegate {}
+extension EditorWindowController: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool { confirmSaveIfDirty() }
+}

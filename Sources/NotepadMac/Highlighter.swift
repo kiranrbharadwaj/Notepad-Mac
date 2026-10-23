@@ -15,7 +15,16 @@ final class Highlighter {
     static func apply(_ language: LanguageDef?, to storage: NSTextStorage) {
         guard !storage.string.isEmpty else { return }
         let full = NSRange(location: 0, length: storage.length)
-        storage.setAttributes([.foregroundColor: NSColor.labelColor], range: full)
+        storage.beginEditing()
+        defer { storage.endEditing() }
+        storage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: full)
+        var fonts: [(NSRange, NSFont)] = []
+        storage.enumerateAttribute(.font, in: full) { value, range, _ in
+            if let font = value as? NSFont {
+                fonts.append((range, NSFontManager.shared.convert(font, toNotHaveTrait: .italicFontMask)))
+            }
+        }
+        for (range, font) in fonts { storage.addAttribute(.font, value: font, range: range) }
 
         guard let lang = language, storage.length <= maxHighlightBytes else { return }
 
@@ -83,6 +92,6 @@ final class Highlighter {
                 attrs[.font] = NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask)
             }
         }
-        storage.setAttributes(attrs, range: range)
+        storage.addAttributes(attrs, range: range)
     }
 }

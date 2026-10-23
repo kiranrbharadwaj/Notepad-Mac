@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // Run with `swift run NotepadMac --selftest`
@@ -93,6 +94,68 @@ enum SelfTest {
         } catch {
             check("search engine no-throw", false)
         }
+        // Regression checks for replacement templates, including absent optional groups.
+        do {
+            var regex = FindOptions()
+            regex.useRegex = true
+            let storage = NSTextStorage(string: "ab b")
+            let count = try SearchEngine.replaceAll("(a)?b", replacement: "<$1>", in: storage, options: regex)
+            check("replace all optional captures", count == 2 && storage.string == "<a> <>")
+            let single = NSTextStorage(string: "abc 123")
+            try SearchEngine.replaceOne("(abc)", replacement: "$1-$0", in: single, options: regex,
+                                        at: NSRange(location: 0, length: 3))
+            check("replace one expands captures", single.string == "abc-abc 123")
+            try SearchEngine.replaceOne("abc", replacement: "bad", in: single, options: regex,
+                                        at: NSRange(location: 8, length: 3))
+            check("replace one rejects unrelated selection", single.string == "abc-abc 123")
+            let literal = NSTextStorage(string: "abc")
+            _ = try SearchEngine.replaceAll("abc", replacement: "$1", in: literal, options: FindOptions())
+            check("literal replacement preserves dollar", literal.string == "$1")
+        } catch { check("replacement regression no-throw", false) }
+
+        // AppKit objects are created without presenting editor windows.
+        _ = NSApplication.shared
+        let font = NSFont.monospacedSystemFont(ofSize: 19, weight: .regular)
+        let highlighted = NSTextStorage(string: "let x = 1 // comment", attributes: [.font: font])
+        Highlighter.apply(Languages.javascript, to: highlighted)
+        let keywordFont = highlighted.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        let commentFont = highlighted.attribute(.font, at: 15, effectiveRange: nil) as? NSFont
+        check("highlight preserves font and zoom", keywordFont?.fontName == font.fontName && keywordFont?.pointSize == 19)
+        check("highlight italicizes comments", commentFont.map { NSFontManager.shared.traits(of: $0).contains(.italicFontMask) } == true)
+        Highlighter.apply(nil, to: highlighted)
+        let resetFont = highlighted.attribute(.font, at: 15, effectiveRange: nil) as? NSFont
+        check("plain text clears comment italics", resetFont.map { !NSFontManager.shared.traits(of: $0).contains(.italicFontMask) && $0.pointSize == 19 } == true)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let doc = EditorDocument()
+            let controller = EditorWindowController(document: doc)
+            controller.textView.string = "edited\ntext"
+            controller.textDidChange(Notification(name: NSText.didChangeNotification))
+            check("editing syncs document and dirty state", doc.text == "edited\ntext" && doc.isDirty)
+            let file = directory.appendingPathComponent("sample.txt")
+            try controller.writeAndSave(to: file)
+            let written = try String(contentsOf: file, encoding: .utf8)
+            check("save writes current text and EOL", written == "edited\r\ntext")
+            check("successful save clears dirty state", !doc.isDirty && doc.fileURL == file)
+            controller.textView.string = "newest text"
+            doc.markDirty()
+            _ = try controller.writeAndSave()
+            check("repeat save reads live editor", try String(contentsOf: file, encoding: .utf8) == "newest text")
+            doc.markDirty()
+            check("cancel Save As prevents closing", !controller.confirmSaveIfDirty(choose: { .alertFirstButtonReturn }, save: { false }) && doc.isDirty)
+            check("cancel close preserves edits", !controller.confirmSaveIfDirty(choose: { .alertThirdButtonReturn }, save: { true }) && doc.isDirty)
+            check("discard decision preserves dirty state until close", controller.confirmSaveIfDirty(choose: { .alertSecondButtonReturn }, save: { false }) && doc.isDirty)
+            check("successful save permits closing", controller.confirmSaveIfDirty(choose: { .alertFirstButtonReturn }, save: { true }))
+            do {
+                try controller.writeAndSave(to: directory.appendingPathComponent("missing/file.txt"))
+                check("failed save throws", false)
+            } catch {
+                check("failed save preserves dirty state and path", doc.isDirty && doc.fileURL == file)
+            }
+        } catch { check("save regression no-throw", false) }
         return pass
     }
 }
